@@ -64,6 +64,9 @@ UPDATE_PROFILE="${update_profile}"
 # Path to an extra dnsmasq configuration file
 LXD_CONFILE="${bridge_dnsmasq}"
 
+# Autogen dnsmasq configuration file from /etc/resolv.conf.
+# LXD_GEN_CONFILE="true"
+
 # DNS domain for the bridge
 LXD_DOMAIN="${bridge_domain}"
 

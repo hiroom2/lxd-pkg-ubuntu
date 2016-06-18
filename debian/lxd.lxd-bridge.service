@@ -2,6 +2,7 @@
 Description=LXD - network bridge
 Documentation=man:lxd(1)
 Before=lxd.service
+After=network.target
 
 [Service]
 Type=oneshot

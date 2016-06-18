@@ -1,6 +1,6 @@
 #!/bin/sh
 config="/etc/default/lxd-bridge"
-varrun="/run/lxd-bridge/"
+varrun="/run/lxd-bridge"
 varlib="/var/lib/lxd-bridge/"
 
 # lxdbr0 defaults to only setting up the standard IPv6 link-local network
@@ -27,6 +27,13 @@ LXD_IPV6_NETWORK=""
 LXD_IPV6_NAT="false"
 LXD_IPV6_PROXY="true"
 
+LXD_GEN_CONFILE="false"
+LXD_GEN_DNSMASQ_CONF=${varrun}/dnsmasq.conf
+LXD_GEN_RESOLV_CONF=${varrun}/resolv.conf
+
+[ -f "${LXD_GEN_DNSMASQ_CONF}" ] && rm -f "${LXD_GEN_DNSMASQ_CONF}"
+[ -f "${LXD_GEN_RESOLV_CONF}" ] && rm -f "${LXD_GEN_RESOLV_CONF}"
+
 [ ! -f "${config}" ] || . "${config}"
 
 use_iptables_lock="-w"
@@ -35,6 +42,45 @@ iptables -w -L -n > /dev/null 2>&1 || use_iptables_lock=""
 HAS_IPV6=false
 [ -e "/proc/sys/net/ipv6/conf/default/disable_ipv6" ] && \
     [ "$(cat /proc/sys/net/ipv6/conf/default/disable_ipv6)" = "0" ] && HAS_IPV6=true
+
+lxd_gen_confile()
+{
+    local nameservers=""
+    local searchs=""
+    local line=""
+
+    [ ! -f /etc/resolv.conf ] && return 1
+
+    while read line; do
+        case ${line} in
+            nameserver*)
+                nameserver=`echo ${line} | awk '{ print $2 }'`
+                nameservers="${nameservers} ${nameserver}"
+                ;;
+            search*)
+                search=`echo $line | awk '{ print $2 }'`
+                searchs="${searchs} ${search}"
+                ;;
+        esac
+    done < /etc/resolv.conf
+
+    [ -z "${searchs}" ] && return 1
+    [ `echo ${nameservers} | wc -w` -le `echo ${searchs} | wc -w` ] && return 1
+
+    for search in ${searchs}; do
+        nameserver=`echo ${nameservers} | awk '{ print $1 }'`
+        nameservers=`echo ${nameservers} | sed "s/${nameserver} //"`
+        echo "server=/${search}/${nameserver}" >> "${LXD_GEN_DNSMASQ_CONF}"
+    done
+
+    echo "resolv-file=${LXD_GEN_RESOLV_CONF}" >> "${LXD_GEN_DNSMASQ_CONF}"
+
+    for nameserver in ${nameservers}; do
+        echo "nameserver ${nameserver}" >> "${LXD_GEN_RESOLV_CONF}"
+    done
+
+    return 0
+}
 
 _netmask2cidr ()
 {
@@ -152,6 +198,9 @@ start() {
     LXD_CONFILE_ARG=""
     if [ -n "${LXD_CONFILE}" ]; then
         LXD_CONFILE_ARG="--conf-file=${LXD_CONFILE}"
+    elif [ "${LXD_GEN_CONFILE}" = "true" ]; then
+        LXD_CONFILE_ARG="--conf-file=${LXD_GEN_DNSMASQ_CONF}"
+        lxd_gen_confile
     fi
 
     # https://lists.linuxcontainers.org/pipermail/lxc-devel/2014-October/010561.html
